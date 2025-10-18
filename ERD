@@ -1,0 +1,62 @@
+┌────────────┐          ┌────────────┐
+│   User     │1        *│   Post     │
+│────────────│──────────│────────────│
+│ _id        │          │ _id        │
+│ name       │          │ title      │
+│ email      │          │ description│
+│ password   │          │ ownerId → User._id
+│ age        │          │ videoUrl   │
+│ gender     │          │ likesCount │
+│ role       │          │ commentsCount│
+│ followersCount│       │ approved(Boolean) │
+│ followingCount│       │ createdAt  │
+└────────────┘          └────────────┘
+        │                         │
+        │                         │
+        │                         │
+        │1                        *│
+        ▼                         ▼
+┌────────────┐          ┌────────────┐
+│  Comment   │          │    Like    │
+│────────────│          │────────────│
+│ _id        │          │ _id        │
+│ text       │          │ userId → User._id │
+│ userId → User._id│    │ postId → Post._id │
+│ postId → Post._id│    │ createdAt │
+│ createdAt  │          └────────────┘
+└────────────┘
+        │
+        │
+        │
+        ▼
+┌────────────┐
+│   Follow   │
+│────────────│
+│ _id        │
+│ followerId → User._id │
+│ followingId → User._id│
+│ createdAt  │
+└────────────┘
+
+(اختياري)
+┌────────────────┐
+│ ModerationLog  │
+│────────────────│
+│ _id            │
+│ postId → Post._id │
+│ adminId → User._id│
+│ action (approve/reject) │
+│ reason         │
+│ createdAt      │
+└────────────────┘
+لعلاقات الرئيسية:
+
+User ↔ Post : One-to-Many
+
+Post ↔ Comment : One-to-Many
+
+User ↔ User : Many-to-Many (من خلال Follow)
+
+User ↔ Post : Many-to-Many (من خلال Like)
+
+Admin هو User role خاص عنده صلاحيات المراجعة
