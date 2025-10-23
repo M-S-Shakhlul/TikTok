@@ -23,6 +23,8 @@ import commentRoutes from './routes/comments.routes.js';
 import likeRoutes from './routes/likes.routes.js';
 import followRoutes from './routes/follow.routes.js';
 import notificationRoutes from "./routes/notifications.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+
 
 
 app.use('/api/users', userRoutes);
@@ -31,6 +33,8 @@ app.use('/api/comments', commentRoutes);
 app.use('/api/likes', likeRoutes);
 app.use('/api/follows', followRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/admin", adminRoutes);
+
 
 
 export default app;
