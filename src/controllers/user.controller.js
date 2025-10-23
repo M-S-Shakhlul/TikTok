@@ -1,4 +1,6 @@
 import User from "../models/user.model.js";
+import Post from "../models/post.model.js";
+import Follow from "../models/follow.model.js";
 
 // 🧩 إنشاء مستخدم جديد
 export const createUser = async (req, res) => {
@@ -20,12 +22,26 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-export const getUserById = async (req, res) => {
+// 👤 عرض بروفايل مستخدم
+export const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-    if (!user)
-      return res.status(404).json({ message: "User not found" });
-    res.json(user);
+    const user = await User.findById(req.params.id).select("-passwordHash");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // 🧮 إحصائيات
+    const posts = await Post.find({ ownerId: user._id });
+    const followers = await Follow.countDocuments({ followingId: user._id });
+    const following = await Follow.countDocuments({ followerId: user._id });
+
+    res.json({
+      user,
+      stats: {
+        followers,
+        following,
+        postsCount: posts.length,
+      },
+      posts,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

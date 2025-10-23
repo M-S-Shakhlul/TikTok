@@ -4,12 +4,14 @@ import {
   getAllPosts,
   getPostById,
   approvePost,
+  getPostsByUser, 
 } from "../controllers/post.controller.js";
 
 const router = express.Router();
 
 router.post("/", createPost);
 router.get("/", getAllPosts);
+router.get("/user/:userId", getPostsByUser);
 router.get("/:id", getPostById);
 router.patch("/:id/approve", approvePost);
 
