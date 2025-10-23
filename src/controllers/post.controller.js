@@ -1,27 +1,51 @@
 import Post from "../models/post.model.js";
-import User from "../models/user.model.js";
+import Notification from "../models/notification.model.js";
+import { v2 as cloudinary } from "cloudinary";
+import fs from "fs";
 
-// 🆕 إنشاء بوست جديد
-export const createPost = async (req, res) => {
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_KEY,
+  api_secret: process.env.CLOUD_SECRET,
+});
+
+export const uploadVideoAndCreatePost = async (req, res) => {
   try {
-    const { ownerId, title, videoUrl } = req.body;
+    const { title, description, ownerId, tags } = req.body;
+    const file = req.file;
 
-    if (!ownerId || !title || !videoUrl) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
+    if (!file) return res.status(400).json({ message: "No video uploaded" });
+    if (!file.mimetype.startsWith("video/"))
+      return res.status(400).json({ message: "Only video files are allowed" });
 
-    const post = await Post.create(req.body);
+    const result = await cloudinary.uploader.upload(file.path, {
+      resource_type: "video",
+      folder: "tiktok_videos",
+    });
 
-    // ✅ زيادة عدد البوستات للمستخدم
-    await User.findByIdAndUpdate(ownerId, { $inc: { postsCount: 1 } });
+    fs.unlinkSync(file.path);
 
-    res.status(201).json(post);
+    const newPost = await Post.create({
+      title,
+      description,
+      ownerId,
+      videoUrl: result.secure_url,
+      thumbnailUrl: result.secure_url + "#t=0.5", 
+      durationSec: Math.round(result.duration),
+      tags: tags ? tags.split(",") : [],
+      approved: false,
+    });
+
+    res.status(201).json({
+      message: "🎥 Video uploaded successfully. Pending admin approval.",
+      post: newPost,
+    });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 };
 
-// 📋 جلب كل البوستات (المعتمدة فقط)
 export const getAllPosts = async (req, res) => {
   try {
     const posts = await Post.find({ approved: true }).populate("ownerId", "name email");
@@ -31,7 +55,6 @@ export const getAllPosts = async (req, res) => {
   }
 };
 
-// 🔍 جلب بوست واحد
 export const getPostById = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id).populate("ownerId", "name email");
@@ -42,17 +65,15 @@ export const getPostById = async (req, res) => {
   }
 };
 
-// 🧩 جلب كل البوستات الخاصة بمستخدم معين
-export const getPostsByUser = async (req, res) => {
+export const getUnapprovedPosts = async (req, res) => {
   try {
-    const posts = await Post.find({ ownerId: req.params.userId }).populate("ownerId", "name email");
-    res.json(posts);
+    const pendingPosts = await Post.find({ approved: false }).populate("ownerId", "name email");
+    res.json(pendingPosts);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ✅ الموافقة على بوست (للأدمن)
 export const approvePost = async (req, res) => {
   try {
     const post = await Post.findByIdAndUpdate(
@@ -60,9 +81,33 @@ export const approvePost = async (req, res) => {
       { approved: true },
       { new: true }
     );
+
     if (!post) return res.status(404).json({ message: "Post not found" });
-    res.json({ message: "Post approved successfully", post });
+
+    await Notification.create({
+      userId: post.ownerId,
+      type: "approve",
+      message: `✅ تم اعتماد الفيديو الخاص بك بعنوان "${post.title}"`,
+      relatedPost: post._id,
+    });
+
+    res.json({ message: "✅ Post approved successfully and user notified", post });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+};
+
+export const deletePost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const publicId = post.videoUrl.split("/").slice(-2).join("/").split(".")[0];
+    await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
+
+    await post.deleteOne();
+    res.json({ message: "🗑️ Post deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
