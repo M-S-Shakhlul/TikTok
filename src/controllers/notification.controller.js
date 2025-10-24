@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Notification from "../models/notification.model.js";
 
 export const createNotification = async (req, res) => {
@@ -22,8 +23,11 @@ export const getUserNotifications = async (req, res) => {
 
 export const markAsRead = async (req, res) => {
   try {
+  const rawId = (req.params.id || '').toString().trim();
+  const id = rawId.startsWith(":") ? rawId.slice(1) : rawId;
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid notification id' });
     const notification = await Notification.findByIdAndUpdate(
-      req.params.id,
+      id,
       { read: true },
       { new: true }
     );

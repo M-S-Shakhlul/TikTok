@@ -1,9 +1,18 @@
 import express from 'express';
-import { addComment, getCommentsByPost } from '../controllers/comment.controller.js';
+import { addReply, getRepliesByComment, getCommentsByPost } from '../controllers/comment.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
-router.post('/', addComment);
+// Backwards-compatible routes:
+// - POST /api/comments/:commentId  -> create a reply to comment (used to be under /comments)
+// - GET  /api/comments/:postId     -> get comments for a post (also available under /api/posts/:id/comments)
+
+// support legacy path that included /replies suffix
+router.post('/:commentId/replies', authenticate, addReply);
+router.get('/:commentId/replies', getRepliesByComment);
+// also support POST /api/comments/:commentId (no suffix) and GET /api/comments/:postId
+router.post('/:commentId', authenticate, addReply);
 router.get('/:postId', getCommentsByPost);
 
 export default router;

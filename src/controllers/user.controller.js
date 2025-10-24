@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import User from "../models/user.model.js";
 import Post from "../models/post.model.js";
 import Follow from "../models/follow.model.js";
@@ -25,7 +26,10 @@ export const getAllUsers = async (req, res) => {
 // 👤 عرض بروفايل مستخدم
 export const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-passwordHash");
+  const rawId = (req.params.id || '').toString().trim();
+  const id = rawId.startsWith(":") ? rawId.slice(1) : rawId;
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid user id' });
+  const user = await User.findById(id).select("-passwordHash");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     // 🧮 إحصائيات

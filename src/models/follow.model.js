@@ -8,4 +8,7 @@ const followSchema = new mongoose.Schema(
 	{ timestamps: true }
 );
 
+// prevent duplicate follow records
+followSchema.index({ followerId: 1, followingId: 1 }, { unique: true });
+
 export default mongoose.model('Follow', followSchema);

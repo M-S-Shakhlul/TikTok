@@ -1,55 +1,117 @@
+import mongoose from 'mongoose';
 import Follow from "../models/follow.model.js";
 import User from "../models/user.model.js";
+import Notification from "../models/notification.model.js";
 
-// ✅ لما يوزر يتابع يوزر تاني
+// ✅ Follow a user (auth required). targetUserId in URL, follower comes from req.user.id
 export const followUser = async (req, res) => {
   try {
-    const { followerId, followingId } = req.body;
+    const followerId = req.user && req.user.id;
+    const followingId = (req.params.targetUserId || '').toString().trim();
 
-    // لو بيحاول يتابع نفسه
-    if (followerId === followingId) {
-      return res.status(400).json({ message: "You can't follow yourself" });
-    }
+    if (!followerId) return res.status(401).json({ message: 'Not authenticated' });
+    if (!mongoose.isValidObjectId(followingId)) return res.status(400).json({ message: 'Invalid target user id' });
 
-    // اتأكد إن المتابعة مش موجودة أصلاً
+    if (followerId === followingId) return res.status(400).json({ message: "You can't follow yourself" });
+
+    // check existing
     const existing = await Follow.findOne({ followerId, followingId });
-    if (existing) {
-      return res.status(400).json({ message: "Already following this user" });
-    }
+    if (existing) return res.status(409).json({ message: 'Already following this user' });
 
-    // إنشاء المتابعة
+    // create follow
     const follow = await Follow.create({ followerId, followingId });
 
-    // تحديث العدادات في الـ Users (اختياري حاليًا)
+    // increment counters
     await User.findByIdAndUpdate(followerId, { $inc: { followingCount: 1 } });
     await User.findByIdAndUpdate(followingId, { $inc: { followersCount: 1 } });
 
-    res.status(201).json({
-      message: "Followed successfully",
-      data: follow,
-    });
+    // create notification for target user (best-effort)
+    try {
+      await Notification.create({
+        userId: followingId,
+        senderId: followerId,
+        type: 'follow',
+        message: `👥 ${req.user.name || 'Someone'} started following you.`,
+      });
+    } catch (e) {
+      console.error('followUser: notification failed', e);
+    }
+
+    res.status(201).json({ message: 'Followed successfully', data: follow });
+  } catch (err) {
+    // handle duplicate key due to race (unique index)
+    if (err && err.code === 11000) return res.status(409).json({ message: 'Already following this user' });
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Unfollow a user (auth required)
+export const unfollowUser = async (req, res) => {
+  try {
+    const followerId = req.user && req.user.id;
+    const followingId = (req.params.targetUserId || '').toString().trim();
+
+    if (!followerId) return res.status(401).json({ message: 'Not authenticated' });
+    if (!mongoose.isValidObjectId(followingId)) return res.status(400).json({ message: 'Invalid target user id' });
+
+    const result = await Follow.findOneAndDelete({ followerId, followingId });
+    if (!result) return res.status(404).json({ message: 'Follow relation not found' });
+
+    // decrement counters (best-effort)
+    try {
+      await User.findByIdAndUpdate(followerId, { $inc: { followingCount: -1 } });
+      await User.findByIdAndUpdate(followingId, { $inc: { followersCount: -1 } });
+    } catch (e) {
+      console.error('unfollowUser: failed to decrement counters', e);
+    }
+
+    res.json({ message: 'Unfollowed successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ✅ جلب كل المتابعين لمستخدم معين
+// ✅ Get followers of a user (with basic pagination)
 export const getFollowers = async (req, res) => {
   try {
-    const followers = await Follow.find({ followingId: req.params.userId })
-      .populate("followerId", "name email");
-    res.json(followers);
+    const userId = (req.params.userId || '').toString().trim();
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ message: 'Invalid user id' });
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Number(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    const followers = await Follow.find({ followingId: userId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('followerId', 'name email avatarUrl');
+
+    const total = await Follow.countDocuments({ followingId: userId });
+    res.json({ total, page, limit, data: followers });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ✅ جلب كل الناس اللي بيتابعهم المستخدم
+// ✅ Get users that a given user is following (with pagination)
 export const getFollowing = async (req, res) => {
   try {
-    const following = await Follow.find({ followerId: req.params.userId })
-      .populate("followingId", "name email");
-    res.json(following);
+    const userId = (req.params.userId || '').toString().trim();
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ message: 'Invalid user id' });
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Number(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    const following = await Follow.find({ followerId: userId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('followingId', 'name email avatarUrl');
+
+    const total = await Follow.countDocuments({ followerId: userId });
+    res.json({ total, page, limit, data: following });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
