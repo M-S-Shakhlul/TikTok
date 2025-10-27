@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
+const __filename = fileURLToPath(
+    import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const buildHtmlFromTemplate = (templateFile, vars = {}) => {
@@ -18,19 +19,17 @@ const buildHtmlFromTemplate = (templateFile, vars = {}) => {
     return html;
 };
 
-const createTransportFromEnv = async () => {
+const createTransportFromEnv = async() => {
     // If SMTP creds are provided, try to use them first
     if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
         const transporter = nodemailer.createTransport({
-            host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-            port: process.env.EMAIL_PORT ? Number(process.env.EMAIL_PORT) : 465,
-            secure: process.env.EMAIL_SECURE ? process.env.EMAIL_SECURE === 'true' : true,
+            service: 'gmail',
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS,
             },
             tls: {
-                rejectUnauthorized: process.env.EMAIL_REJECT_UNAUTHORIZED !== 'false',
+                rejectUnauthorized: false // تعطيل التحقق من TLS للتطوير
             },
             connectionTimeout: 10000,
             greetingTimeout: 10000,
@@ -63,7 +62,7 @@ const createTransportFromEnv = async () => {
     return { transporter, from: process.env.EMAIL_FROM || testAccount.user, isTest: true, testAccount };
 };
 
-const sendEmail = async ({ to, subject, template, templateVars }) => {
+const sendEmail = async({ to, subject, template, templateVars }) => {
     try {
         const html = buildHtmlFromTemplate(template, templateVars || {});
 

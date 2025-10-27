@@ -1,6 +1,8 @@
 import express from 'express';
 import { addReply, getRepliesByComment, getCommentsByPost } from '../controllers/comment.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
+import { validate } from '../middlewares/validate.middleware.js';
+import { createReplyValidation } from '../validation/replyValidate.js';
 
 const router = express.Router();
 
@@ -9,10 +11,10 @@ const router = express.Router();
 // - GET  /api/comments/:postId     -> get comments for a post (also available under /api/posts/:id/comments)
 
 // support legacy path that included /replies suffix
-router.post('/:commentId/replies', authenticate, addReply);
+router.post('/:commentId/replies', authenticate, validate(createReplyValidation), addReply);
 router.get('/:commentId/replies', getRepliesByComment);
 // also support POST /api/comments/:commentId (no suffix) and GET /api/comments/:postId
-router.post('/:commentId', authenticate, addReply);
+router.post('/:commentId', authenticate, validate(createReplyValidation), addReply);
 router.get('/:postId', getCommentsByPost);
 
 export default router;

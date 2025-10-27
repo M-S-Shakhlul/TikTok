@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 
-const userSchema = new mongoose.Schema(
-  {
+const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     passwordHash: { type: String, required: true },
     name: { type: String, required: true },
@@ -15,8 +14,8 @@ const userSchema = new mongoose.Schema(
 
     // Social login providers ids
     providers: {
-      googleId: { type: String },
-      facebookId: { type: String },
+        googleId: { type: String },
+        facebookId: { type: String },
     },
 
     bio: { type: String },
@@ -32,13 +31,47 @@ const userSchema = new mongoose.Schema(
     emailVerificationToken: { type: String },
     isBanned: { type: Boolean, default: false },
 
+    // Password reset
+    resetPasswordToken: { type: String },
+    resetPasswordExpire: { type: Date },
+
     // Misc
     settings: { type: Object, default: {} },
-  },
-  { timestamps: true }
-);
+}, { timestamps: true });
 
 // Index commonly queried fields
 userSchema.index({ email: 1 });
+
+// 🧹 Cascade delete when a user is removed: posts, comments, replies, likes, follows, notifications, moderation logs
+userSchema.post('findOneAndDelete', async function(doc) {
+    try {
+        if (!doc) return;
+        const mongooseInstance = mongoose;
+        const Post = mongooseInstance.model('Post');
+        const Comment = mongooseInstance.model('Comment');
+        const Reply = mongooseInstance.model('Reply');
+        const Like = mongooseInstance.model('Like');
+        const Follow = mongooseInstance.model('Follow');
+        const ModerationLog = mongooseInstance.model('ModerationLog');
+        const Notification = mongooseInstance.model('Notification');
+
+        // Deleting posts will trigger post model hooks to remove their comments/likes/notifications
+        await Post.deleteMany({ ownerId: doc._id });
+
+        // Delete user's comments, replies, likes, follow relations, moderation logs and notifications
+        await Promise.all([
+            Comment.deleteMany({ userId: doc._id }),
+            Reply.deleteMany({ userId: doc._id }),
+            Like.deleteMany({ userId: doc._id }),
+            Follow.deleteMany({ $or: [{ followerId: doc._id }, { followingId: doc._id }] }),
+            ModerationLog.deleteMany({ adminId: doc._id }),
+            Notification.deleteMany({ $or: [{ userId: doc._id }, { senderId: doc._id }] }),
+        ]);
+
+        console.log(`Cascaded delete for user ${doc._id}`);
+    } catch (err) {
+        console.error('Error in user post-delete hook:', err);
+    }
+});
 
 export default mongoose.model('User', userSchema);

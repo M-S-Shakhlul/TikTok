@@ -131,3 +131,119 @@ export const login = async(req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+export const forgotPassword = async(req, res) => {
+    try {
+        let { email } = req.body;
+        email = (email || '').toLowerCase().trim();
+
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Generate random reset token
+        const resetToken = crypto.randomBytes(32).toString("hex");
+
+        // Hash token and set to resetPasswordToken field
+        user.resetPasswordToken = crypto
+            .createHash("sha256")
+            .update(resetToken)
+            .digest("hex");
+
+        // Set expire (15 minutes)
+        user.resetPasswordExpire = Date.now() + 15 * 60 * 1000;
+
+        await user.save({ validateBeforeSave: false });
+
+        // Create reset URL
+        const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+
+        try {
+            await sendEmail({
+                to: user.email,
+                subject: "Password Reset Request - TikTok Clone",
+                template: "resetPassword.html",
+                templateVars: {
+                    reset_link: resetUrl,
+                    username: user.name
+                }
+            });
+
+            res.status(200).json({
+                message: "Password reset email sent successfully",
+                debug_link: resetUrl // Remove in production
+            });
+        } catch (err) {
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpire = undefined;
+            await user.save({ validateBeforeSave: false });
+
+            console.error("Send reset email failed:", err);
+            return res.status(500).json({
+                message: "Email could not be sent",
+                error: err.message
+            });
+        }
+    } catch (err) {
+        console.error("Forgot password error:", err);
+        res.status(500).json({
+            message: "Something went wrong",
+            error: err.message
+        });
+    }
+};
+
+export const resetPassword = async(req, res) => {
+    try {
+        const { token, email, password } = req.body;
+
+        if (!token || !email || !password) {
+            return res.status(400).json({
+                message: "Missing required fields: token, email, and password"
+            });
+        }
+
+        // Get hashed token
+        const resetPasswordToken = crypto
+            .createHash("sha256")
+            .update(token)
+            .digest("hex");
+
+        const user = await User.findOne({
+            email: email.toLowerCase().trim(),
+            resetPasswordToken,
+            resetPasswordExpire: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                message: "Invalid or expired reset token"
+            });
+        }
+
+        // Set new password
+        const salt = await bcrypt.genSalt(12);
+        user.passwordHash = await bcrypt.hash(password, salt);
+
+        // Clear reset token fields
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+
+        await user.save();
+
+        res.status(200).json({
+            message: "Password reset successful"
+        });
+    } catch (err) {
+        console.error("Reset password error:", err);
+        res.status(500).json({
+            message: "Password reset failed",
+            error: err.message
+        });
+    }
+};
