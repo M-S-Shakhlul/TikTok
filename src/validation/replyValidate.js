@@ -1,9 +1,9 @@
 import Joi from "joi";
 
 const replySchema = Joi.object({
-    commentId: Joi.string().required(),
-    userId: Joi.string().required(),
     text: Joi.string().min(1).max(500).required(),
+    commentId: Joi.string().optional(),
+    userId: Joi.string().optional(),
 });
 
 export const createReplyValidation = replySchema;

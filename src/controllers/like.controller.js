@@ -19,7 +19,8 @@ export const likePost = async(req, res) => {
         const existing = await Like.findOne({ userId, postId });
         if (existing) {
             // unlike
-            await Like.deleteOne({ _id: existing._id });
+
+            await Like.findOneAndDelete({ _id: existing._id });
             const updatedPost = await Post.findByIdAndUpdate(postId, { $inc: { likesCount: -1 } }, { new: true });
 
             // remove corresponding notification (best-effort)

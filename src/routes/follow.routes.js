@@ -1,9 +1,9 @@
 import express from "express";
 import {
-  followUser,
-  unfollowUser,
-  getFollowers,
-  getFollowing,
+    followUser,
+    unfollowUser,
+    getFollowers,
+    getFollowing,
 } from "../controllers/follow.controller.js";
 import { authenticate } from "../middlewares/auth.middleware.js";
 

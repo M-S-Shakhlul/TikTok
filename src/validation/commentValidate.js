@@ -1,9 +1,9 @@
 import Joi from "joi";
 
 const commentSchema = Joi.object({
-    postId: Joi.string().required(),
-    userId: Joi.string().required(),
     text: Joi.string().min(1).max(500).required(),
+    postId: Joi.string().optional(),
+    userId: Joi.string().optional(),
 });
 
 export const createCommentValidation = commentSchema;

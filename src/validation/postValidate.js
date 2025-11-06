@@ -1,26 +1,33 @@
+// src/validations/post.validation.js
 import Joi from "joi";
 
-const postSchema = Joi.object({
+const tagsField = Joi.alternatives().try(
+    Joi.array().items(Joi.string()),
+    Joi.string()
+).optional();
+
+export const createPostValidation = Joi.object({
     title: Joi.string().min(3).max(100).required(),
     description: Joi.string().max(300).allow(""),
-    ownerId: Joi.string().required(),
-    videoUrl: Joi.string().uri().required(),
-    mimeType: Joi.string().optional(),
-    sizeBytes: Joi.number().optional(),
-
+    videoUrl: Joi.string().uri().required(), // عندما يكون الفيديو موجود مسبقًا
+    thumbnailUrl: Joi.string().uri().optional(),
     durationSec: Joi.number().optional(),
-    category: Joi.string().optional(),
-    tags: Joi.array().items(Joi.string()).optional(),
-
-    visibility: Joi.string().valid("public", "private").default("public"),
-    processingStatus: Joi.string()
-        .valid("pending", "processing", "ready", "failed")
-        .default("ready"),
+    tags: tagsField.default([]),
+    ownerId: Joi.string().optional(), // لأنك ممكن تبعته من الـ frontend أو من التوكن
 });
 
-export const createPostValidation = postSchema;
+export const uploadPostValidation = Joi.object({
+    title: Joi.string().min(3).max(100).required(),
+    description: Joi.string().max(300).allow(""),
+    ownerId: Joi.string().optional(), // backend ممكن يجيبها من التوكن
+    tags: tagsField.default([]),
+});
 
-export const updatePostValidation = postSchema.fork(
-    ['ownerId', 'videoUrl'],
-    (schema) => schema.optional()
-);
+export const updatePostValidation = Joi.object({
+    title: Joi.string().min(3).max(100).optional(),
+    description: Joi.string().max(300).allow("").optional(),
+    thumbnailUrl: Joi.string().uri().optional(),
+    videoUrl: Joi.string().uri().optional(),
+    durationSec: Joi.number().optional(),
+    tags: tagsField.optional(),
+});
