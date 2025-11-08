@@ -15,145 +15,239 @@ import Notification from '../models/notification.model.js';
 // - GET /api/comments/:commentId/replies -> return replies for a comment (paginated)
 
 const normalizeId = (raw) => {
-  if (!raw) return raw;
-  const s = raw.toString().trim();
-  return s.startsWith(':') ? s.slice(1) : s;
+    if (!raw) return raw;
+    const s = raw.toString().trim();
+    return s.startsWith(':') ? s.slice(1) : s;
 };
 
-export const addComment = async (req, res) => {
-  try {
-  // support routes that use either :postId or :id (posts.routes uses :id)
-  const postId = normalizeId(req.params.postId || req.params.id);
-    const userId = req.user && req.user.id;
-    const { text } = req.body;
+export const addComment = async(req, res) => {
+    try {
+        // support routes that use either :postId or :id (posts.routes uses :id)
+        const postId = normalizeId(req.params.postId || req.params.id);
+        const userId = req.user && req.user.id;
+        const { text } = req.body;
 
-  if (!mongoose.isValidObjectId(postId)) return res.status(400).json({ error: 'Invalid post id' });
-    if (!text || !text.trim()) return res.status(400).json({ error: 'Comment text is required' });
+        if (!mongoose.isValidObjectId(postId)) return res.status(400).json({ error: 'Invalid post id' });
+        if (!text || !text.trim()) return res.status(400).json({ error: 'Comment text is required' });
 
-    const post = await Post.findById(postId).select('userId');
-    if (!post) return res.status(404).json({ error: 'Post not found' });
+        const post = await Post.findById(postId).select('userId');
+        if (!post) return res.status(404).json({ error: 'Post not found' });
 
-    const comment = await Comment.create({ postId, userId, text: text.trim() });
+        const comment = await Comment.create({ postId, userId, text: text.trim() });
 
-    // increment post comments counter
-    await Post.findByIdAndUpdate(postId, { $inc: { commentsCount: 1 } });
+        // create notification for post owner (don't notify self)
+        // guard against missing userIds to avoid runtime errors
+        if (post.userId && userId && post.userId.toString() !== userId.toString()) {
+            await Notification.create({
+                userId: post.userId,
+                senderId: userId,
+                type: 'comment',
+                message: 'Someone commented on your post',
+                relatedPost: postId,
+                relatedComment: comment._id
+            });
+        }
 
-    // create notification for post owner (don't notify self)
-    // guard against missing userIds to avoid runtime errors
-    if (post.userId && userId && post.userId.toString() !== userId.toString()) {
-      await Notification.create({
-        userId: post.userId,
-        senderId: userId,
-        type: 'comment',
-        message: 'Someone commented on your post',
-        relatedPost: postId,
-      });
+        const populated = await Comment.findById(comment._id).populate('userId', 'name avatarUrl');
+        res.status(201).json(populated);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
     }
-
-    const populated = await Comment.findById(comment._id).populate('userId', 'name avatarUrl');
-    res.status(201).json(populated);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
 };
 
-export const addReply = async (req, res) => {
-  try {
-  // support routes that use either :commentId or :id
-  const commentId = normalizeId(req.params.commentId || req.params.id);
-    const userId = req.user && req.user.id;
-    const { text } = req.body;
+export const addReply = async(req, res) => {
+    try {
+        // support routes that use either :commentId or :id
+        const commentId = normalizeId(req.params.commentId || req.params.id);
+        const userId = req.user && req.user.id;
+        const { text } = req.body;
 
-    if (!mongoose.isValidObjectId(commentId)) return res.status(400).json({ error: 'Invalid comment id' });
-    if (!text || !text.trim()) return res.status(400).json({ error: 'Reply text is required' });
+        if (!mongoose.isValidObjectId(commentId)) return res.status(400).json({ error: 'Invalid comment id' });
+        if (!text || !text.trim()) return res.status(400).json({ error: 'Reply text is required' });
 
-    const comment = await Comment.findById(commentId).select('userId postId');
-    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+        const comment = await Comment.findById(commentId).select('userId postId');
+        if (!comment) return res.status(404).json({ error: 'Comment not found' });
 
-    const reply = await Reply.create({ commentId, userId, text: text.trim() });
+        const reply = await Reply.create({ commentId, userId, text: text.trim() });
 
-    // increment comment replies counter
-    await Comment.findByIdAndUpdate(commentId, { $inc: { repliesCount: 1 } });
+        // notify comment owner (don't notify self)
+        // guard against missing userIds to avoid runtime errors
+        if (comment.userId && userId && comment.userId.toString() !== userId.toString()) {
+            await Notification.create({
+                userId: comment.userId,
+                senderId: userId,
+                type: 'reply',
+                message: 'Someone replied to your comment',
+                relatedPost: comment.postId,
+                relatedComment: comment._id,
+                relatedReply: reply._id
+            });
+        }
 
-    // notify comment owner (don't notify self)
-    // guard against missing userIds to avoid runtime errors
-    if (comment.userId && userId && comment.userId.toString() !== userId.toString()) {
-      await Notification.create({
-        userId: comment.userId,
-        senderId: userId,
-        type: 'comment',
-        message: 'Someone replied to your comment',
-        relatedPost: comment.postId,
-      });
+        const populated = await Reply.findById(reply._id).populate('userId', 'name avatarUrl');
+        res.status(201).json(populated);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
     }
-
-    const populated = await Reply.findById(reply._id).populate('userId', 'name avatarUrl');
-    res.status(201).json(populated);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
 };
 
-export const getRepliesByComment = async (req, res) => {
-  try {
-  const commentId = normalizeId(req.params.commentId || req.params.id);
-  if (!mongoose.isValidObjectId(commentId)) return res.status(400).json({ error: 'Invalid comment id' });
+export const getRepliesByComment = async(req, res) => {
+    try {
+        const commentId = normalizeId(req.params.commentId || req.params.id);
+        if (!mongoose.isValidObjectId(commentId)) return res.status(400).json({ error: 'Invalid comment id' });
 
-    const page = Math.max(1, parseInt(req.query.page || '1', 10));
-    const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
-    const skip = (page - 1) * limit;
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const skip = (page - 1) * limit;
 
-    const replies = await Reply.find({ commentId })
-      .sort({ createdAt: 1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'name avatarUrl')
-      .lean();
+        const replies = await Reply.find({ commentId })
+            .sort({ createdAt: 1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('userId', 'name avatarUrl')
+            .lean();
 
-    res.json({ page, limit, data: replies });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+        res.json({ page, limit, data: replies });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
-export const getCommentsByPost = async (req, res) => {
-  try {
-  const postId = normalizeId(req.params.postId || req.params.id);
-  if (!mongoose.isValidObjectId(postId)) return res.status(400).json({ error: 'Invalid post id' });
+// Delete a comment
+export const deleteComment = async(req, res) => {
+    try {
+        const commentId = normalizeId(req.params.commentId);
+        // More robust user checking
+        if (!req.user) {
+            return res.status(401).json({ error: 'User not authenticated' });
+        }
+        const userId = req.user.id;
+        const isAdmin = req.user.role === 'admin';
 
-    const page = Math.max(1, parseInt(req.query.page || '1', 10));
-    const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
-    const skip = (page - 1) * limit;
+        if (!mongoose.isValidObjectId(commentId)) {
+            return res.status(400).json({ error: 'Invalid comment id' });
+        }
 
-    // fetch comments
-    const comments = await Comment.find({ postId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'name avatarUrl')
-      .lean();
+        const comment = await Comment.findById(commentId).populate('postId', 'userId');
+        if (!comment) {
+            return res.status(404).json({ error: 'Comment not found' });
+        }
 
-    const commentIds = comments.map((c) => c._id);
+        // Allow comment owner, post owner, or admin to delete
+        const isCommentOwner = comment.userId && comment.userId.toString() === userId;
+        const isPostOwner = comment.postId && comment.postId.userId &&
+            comment.postId.userId.toString() === userId;
 
-    // fetch replies for these comments
-    const replies = await Reply.find({ commentId: { $in: commentIds } })
-      .sort({ createdAt: 1 })
-      .populate('userId', 'name avatarUrl')
-      .lean();
+        if (!isCommentOwner && !isPostOwner && !isAdmin) {
+            return res.status(403).json({ error: 'Not authorized to delete this comment' });
+        }
 
-    // group replies by commentId
-    const repliesByComment = replies.reduce((acc, r) => {
-      const key = r.commentId.toString();
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(r);
-      return acc;
-    }, {});
+        await Comment.findByIdAndDelete(commentId);
 
-    // attach replies to comments
-    const results = comments.map((c) => ({ ...c, replies: repliesByComment[c._id.toString()] || [] }));
+        res.json({ message: 'Comment deleted successfully' });
+    } catch (err) {
+        console.error('Error deleting comment:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
 
-    res.json({ page, limit, data: results });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+export const getCommentsByPost = async(req, res) => {
+    try {
+        const postId = normalizeId(req.params.postId || req.params.id);
+        if (!mongoose.isValidObjectId(postId)) return res.status(400).json({ error: 'Invalid post id' });
+
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const skip = (page - 1) * limit;
+
+        // fetch comments
+        const comments = await Comment.find({ postId })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('userId', 'name avatarUrl')
+            .lean();
+
+        const commentIds = comments.map((c) => c._id);
+
+        // fetch replies for these comments
+        const replies = await Reply.find({ commentId: { $in: commentIds } })
+            .sort({ createdAt: 1 })
+            .populate('userId', 'name avatarUrl')
+            .lean();
+
+        // group replies by commentId
+        const repliesByComment = replies.reduce((acc, r) => {
+            const key = r.commentId.toString();
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(r);
+            return acc;
+        }, {});
+
+        // attach replies to comments
+        const results = comments.map((c) => ({...c, replies: repliesByComment[c._id.toString()] || [] }));
+
+        res.json({ page, limit, data: results });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// Delete a reply
+export const deleteReply = async(req, res) => {
+    try {
+        const replyId = normalizeId(req.params.replyId);
+
+        // Check authentication
+        if (!req.user) {
+            return res.status(401).json({ error: 'User not authenticated' });
+        }
+        const userId = req.user.id;
+        const isAdmin = req.user.role === 'admin';
+
+        // Validate replyId
+        if (!mongoose.isValidObjectId(replyId)) {
+            return res.status(400).json({ error: 'Invalid reply id' });
+        }
+
+        // Find the reply and populate necessary fields
+        const reply = await Reply.findById(replyId)
+            .populate({
+                path: 'commentId',
+                select: 'userId postId',
+                populate: {
+                    path: 'postId',
+                    select: 'userId'
+                }
+            });
+
+        if (!reply) {
+            return res.status(404).json({ error: 'Reply not found' });
+        }
+
+        // Check authorization - allow reply owner, comment owner, post owner, or admin to delete
+        const isReplyOwner = reply.userId.toString() === userId;
+        const isCommentOwner = reply.commentId &&
+            reply.commentId.userId &&
+            reply.commentId.userId.toString() === userId;
+        const isPostOwner = reply.commentId &&
+            reply.commentId.postId &&
+            reply.commentId.postId.userId &&
+            reply.commentId.postId.userId.toString() === userId;
+
+        if (!isReplyOwner && !isCommentOwner && !isPostOwner && !isAdmin) {
+            return res.status(403).json({ error: 'Not authorized to delete this reply' });
+        }
+
+        // Delete the reply
+        await Reply.findByIdAndDelete(replyId);
+
+        // Delete any notifications related to this reply
+        await Notification.deleteMany({ relatedReply: replyId });
+
+        res.json({ message: 'Reply deleted successfully' });
+    } catch (err) {
+        console.error('Error deleting reply:', err);
+        res.status(500).json({ error: err.message });
+    }
 };

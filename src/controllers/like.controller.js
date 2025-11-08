@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import Like from '../models/like.model.js';
 import Post from '../models/post.model.js';
 import Notification from '../models/notification.model.js';
+import { updateWithRetry } from '../utils/count.utils.js';
 
 
 export const likePost = async(req, res) => {
@@ -19,15 +20,20 @@ export const likePost = async(req, res) => {
         const existing = await Like.findOne({ userId, postId });
         if (existing) {
             // unlike
-
             await Like.findOneAndDelete({ _id: existing._id });
-            const updatedPost = await Post.findByIdAndUpdate(postId, { $inc: { likesCount: -1 } }, { new: true });
+            // Get updated post to return current count (model hook will handle the decrement)
+            const updatedPost = await Post.findById(postId);
 
             // remove corresponding notification (best-effort)
             try {
                 const post = await Post.findById(postId).select('ownerId');
                 if (post && post.ownerId) {
-                    await Notification.findOneAndDelete({ userId: post.ownerId, senderId: userId, type: 'like', relatedPost: postId });
+                    await Notification.findOneAndDelete({
+                        userId: post.ownerId,
+                        senderId: userId,
+                        type: 'like',
+                        relatedPost: postId
+                    });
                 }
             } catch (e) {
                 console.error('likePost: failed to remove notification on unlike', e);
@@ -37,9 +43,9 @@ export const likePost = async(req, res) => {
         }
 
         // create like
-        const like = await Like.create({ userId, postId });
-
-        const updated = await Post.findByIdAndUpdate(postId, { $inc: { likesCount: 1 } }, { new: true });
+        const likeCreated = await Like.create({ userId, postId });
+        // Get updated post to return current count (model hook will handle the increment)
+        const updated = await Post.findById(postId);
 
         // notify owner (best-effort)
         try {
@@ -57,7 +63,7 @@ export const likePost = async(req, res) => {
             console.error('likePost: failed to create notification', notifErr);
         }
 
-        res.status(201).json({ liked: true, likesCount: updated ? updated.likesCount : undefined, like });
+        res.status(201).json({ liked: true, likesCount: updated ? updated.likesCount : undefined, like: likeCreated });
     } catch (err) {
         res.status(400).json({ error: err.message });
     }

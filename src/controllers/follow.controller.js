@@ -18,12 +18,8 @@ export const followUser = async(req, res) => {
         const existing = await Follow.findOne({ followerId, followingId });
         if (existing) return res.status(409).json({ message: 'Already following this user' });
 
-        // create follow
+        // create follow (model middleware will update user counts)
         const follow = await Follow.create({ followerId, followingId });
-
-        // increment counters
-        await User.findByIdAndUpdate(followerId, { $inc: { followingCount: 1 } });
-        await User.findByIdAndUpdate(followingId, { $inc: { followersCount: 1 } });
 
         // create notification for target user (best-effort)
         try {
@@ -57,13 +53,7 @@ export const unfollowUser = async(req, res) => {
         const result = await Follow.findOneAndDelete({ followerId, followingId });
         if (!result) return res.status(404).json({ message: 'Follow relation not found' });
 
-        // decrement counters (best-effort)
-        try {
-            await User.findByIdAndUpdate(followerId, { $inc: { followingCount: -1 } });
-            await User.findByIdAndUpdate(followingId, { $inc: { followersCount: -1 } });
-        } catch (e) {
-            console.error('unfollowUser: failed to decrement counters', e);
-        }
+        // model middleware (followSchema.post('findOneAndDelete')) will decrement counts
 
         // remove follow notification (best-effort)
         try {

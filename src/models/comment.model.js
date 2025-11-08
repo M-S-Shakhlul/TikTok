@@ -7,18 +7,34 @@ const commentSchema = new mongoose.Schema({
     repliesCount: { type: Number, default: 0 },
 }, { timestamps: true });
 
-// 🧹 When a comment is deleted: remove replies and decrement post commentsCount
+// 🧹 When a comment is deleted: remove replies, notifications and decrement post commentsCount
 commentSchema.post('findOneAndDelete', async function(doc) {
     try {
         if (!doc) return;
         const mongooseInstance = mongoose;
         const Reply = mongooseInstance.model('Reply');
         const Post = mongooseInstance.model('Post');
+        const Notification = mongooseInstance.model('Notification');
+
+        // Get all replies to delete their notifications too
+        const replies = await Reply.find({ commentId: doc._id }).select('_id userId');
+        const replyIds = replies.map(r => r._id);
 
         await Promise.all([
+            // Delete all replies
             Reply.deleteMany({ commentId: doc._id }),
+            // Update post comment count
             Post.findByIdAndUpdate(doc.postId, { $inc: { commentsCount: -1 } }),
+            // Delete notifications for this comment and its replies
+            Notification.deleteMany({
+                $or: [
+                    { type: 'comment', relatedComment: doc._id },
+                    { type: 'reply', relatedReply: { $in: replyIds } }
+                ]
+            })
         ]);
+
+        console.log(`Cascaded delete for comment ${doc._id} including ${replyIds.length} replies`);
     } catch (err) {
         console.error('Error in comment post-delete hook:', err);
     }
