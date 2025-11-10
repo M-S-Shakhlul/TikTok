@@ -37,21 +37,38 @@ import mongoose from "mongoose";
 
 export const connectDB = async() => {
     try {
-        const mongoURI = process.env.MONGO_URI;
+        const envUri = process.env.MONGO_URI;
+        let uri;
+        let source = 'env:MONGO_URI';
 
-        if (!mongoURI) {
-            console.error("❌ MONGO_URI not defined in .env");
-            process.exit(1);
+        if (envUri && envUri.trim() !== '') {
+            uri = envUri.trim();
+        } else {
+            // build from components (safer when you store user/pass separately)
+            const user = process.env.MONGO_USER;
+            const pass = process.env.MONGO_PASS;
+            const dbName = process.env.MONGO_DB_NAME || 'tiktok_clone';
+            const host = process.env.MONGO_HOST || 'cluster0.j2zfbq7.mongodb.net';
+
+            if (!user || !pass) {
+                console.error('❌ MONGO_URI not defined and MONGO_USER/MONGO_PASS missing in .env');
+                process.exit(1);
+            }
+
+            const encodedUser = encodeURIComponent(user);
+            const encodedPass = encodeURIComponent(pass);
+            uri = `mongodb+srv://${encodedUser}:${encodedPass}@${host}/${dbName}?retryWrites=true&w=majority`;
+            source = 'constructed:MONGO_USER/MONGO_PASS';
         }
 
-        await mongoose.connect(mongoURI, {
+        await mongoose.connect(uri, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
         });
 
-        console.log("✅ Connected to MongoDB successfully (Local)");
+        console.log(`✅ Connected to MongoDB successfully (${source})`);
     } catch (err) {
-        console.error("❌ MongoDB connection failed:", err.message);
+        console.error('❌ MongoDB connection failed:', err.message || err);
         process.exit(1);
     }
 };
