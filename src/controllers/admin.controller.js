@@ -100,6 +100,59 @@ export const rejectPost = async(req, res) => {
     }
 };
 
+export const getApprovedPosts = async(req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Get approved posts with pagination
+        const posts = await Post.find({ approved: true })
+            .populate("ownerId", "name email")
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        // Get total count
+        const total = await Post.countDocuments({ approved: true });
+
+        res.json({
+            message: "Approved posts retrieved",
+            posts,
+            pagination: {
+                currentPage: page,
+                totalPages: Math.ceil(total / limit),
+                totalPosts: total,
+                limit
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+export const getPostStats = async(req, res) => {
+    try {
+        const [approvedCount, unapprovedCount, totalCount] = await Promise.all([
+            Post.countDocuments({ approved: true }),
+            Post.countDocuments({ approved: false }),
+            Post.countDocuments()
+        ]);
+
+        res.json({
+            stats: {
+                totalPosts: totalCount,
+                approvedPosts: approvedCount,
+                pendingPosts: unapprovedCount,
+                approvalRate: totalCount > 0 ? ((approvedCount / totalCount) * 100).toFixed(2) + '%' : '0%'
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
 export const getModerationLogs = async(req, res) => {
     try {
         const logs = await ModerationLog.find()

@@ -26,10 +26,12 @@ const userSchema = new mongoose.Schema({
     followingCount: { type: Number, default: 0 },
     postsCount: { type: Number, default: 0 },
 
-    // Email verification / account state
-    emailVerified: { type: Boolean, default: false },
-    emailVerificationToken: { type: String },
+    // Account state
     isBanned: { type: Boolean, default: false },
+
+    // Refresh token management (hashed for security)
+    refreshTokenHash: { type: String }, // SHA256 hash of current refresh token
+    refreshTokenIssuedAt: { type: Date }, // When current refresh token was issued
 
     // Password reset
     resetPasswordToken: { type: String },

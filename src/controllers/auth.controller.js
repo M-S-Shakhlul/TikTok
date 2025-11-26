@@ -15,7 +15,9 @@ export const register = async(req, res) => {
 
         const passwordHash = await bcrypt.hash(password, 12);
 
-        const verificationToken = crypto.randomBytes(32).toString('hex');
+        // Generate initial refresh token
+        const refreshToken = crypto.randomBytes(32).toString('hex');
+        const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
 
         const newUser = new User({
             name,
@@ -23,87 +25,30 @@ export const register = async(req, res) => {
             passwordHash,
             age,
             gender,
-            // use the schema field name `emailVerified`
-            emailVerified: false,
-            emailVerificationToken: verificationToken,
+            refreshTokenHash,
+            refreshTokenIssuedAt: new Date(),
         });
 
         await newUser.save();
 
-        const serverUrl = process.env.SERVER_URL || `${req.protocol}://${req.get('host')}`;
-        const verifyLink = `${serverUrl}/api/auth/verify-email?token=${encodeURIComponent(verificationToken)}&email=${encodeURIComponent(newUser.email)}`;
+        // Generate access token (15 min)
+        const accessToken = jwt.sign({ id: newUser._id, role: newUser.role, email: newUser.email },
+            process.env.JWT_SECRET, { expiresIn: process.env.ACCESS_TOKEN_EXPIRY || '15m' }
+        );
 
-        let emailResult = null;
-        try {
-            emailResult = await sendEmail({
-                to: newUser.email,
-                subject: 'Verify your email to join TikTok Clone',
-                template: 'verifyEmail.html',
-                templateVars: { verify_link: verifyLink },
-            });
-        } catch (emailErr) {
-            console.error('sendEmail error during registration:', emailErr);
-            // Continue — registration succeeded even if email failed
-        }
-
-        const responsePayload = {
-            message: 'Registered successfully. Please verify your email before login (check your inbox).',
+        res.status(201).json({
+            message: 'Registered successfully',
             user: { id: newUser._id, name: newUser.name, email: newUser.email },
-        };
-
-        // In development, surface Ethereal preview URL so testers can click it directly
-        if (process.env.NODE_ENV !== 'production' && emailResult && emailResult.previewUrl) {
-            responsePayload.emailPreview = emailResult.previewUrl;
-        }
-
-        res.status(201).json(responsePayload);
+            accessToken,
+            refreshToken,
+        });
     } catch (err) {
         console.error('Register error:', err);
         res.status(500).json({ message: 'Server error' });
     }
 };
 
-export const verifyEmail = async(req, res) => {
-    try {
-        const { token, email } = req.query;
-        if (!token || !email) {
-            console.warn('Verification: missing token or email');
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=invalid`);
-        }
-        const user = await User.findOne({ email });
-        if (!user) {
-            console.warn('Verification: user not found', email);
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=notfound`);
-        }
-        // check the schema field `emailVerified`
-        if (user.emailVerified) {
-            console.info('Verification: already verified', email);
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=already`);
-        }
-        if (!user.emailVerificationToken) {
-            console.warn('Verification: no token stored for user', email);
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=invalid`);
-        }
-        if (user.emailVerificationToken !== token) {
-            console.warn('Verification: token mismatch', token, user.emailVerificationToken);
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=invalid`);
-        }
-        user.emailVerified = true;
-        user.emailVerificationToken = undefined;
-        await user.save();
-        console.info('Verification: success', email);
-        if (process.env.CLIENT_URL) {
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=success`);
-        }
-        return res.json({ status: 'success', email: user.email });
-    } catch (err) {
-        console.error('Verification error:', err);
-        if (process.env.CLIENT_URL) {
-            return res.redirect(`${process.env.CLIENT_URL}/verify?status=error`);
-        }
-        return res.status(500).json({ status: 'error' });
-    }
-};
+
 
 export const login = async(req, res) => {
     try {
@@ -112,22 +57,99 @@ export const login = async(req, res) => {
 
         const user = await User.findOne({ email });
         if (!user) return res.status(404).json({ message: 'User not found' });
-        if (!user.emailVerified) return res.status(403).json({ message: 'Please verify your email first' });
 
         const match = await bcrypt.compare(password, user.passwordHash);
         if (!match) return res.status(400).json({ message: 'Invalid credentials' });
 
-        const token = jwt.sign({ id: user._id, role: user.role, email: user.email },
-            process.env.JWT_SECRET, { expiresIn: '2h' }
+        // Generate access token (short-lived)
+        const accessToken = jwt.sign({ id: user._id, role: user.role, email: user.email },
+            process.env.JWT_SECRET, { expiresIn: process.env.ACCESS_TOKEN_EXPIRY || '15m' }
         );
+
+        // Generate refresh token (random, long-lived)
+        const refreshToken = crypto.randomBytes(32).toString('hex');
+        const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+        // Store hashed refresh token and issuance time
+        user.refreshTokenHash = refreshTokenHash;
+        user.refreshTokenIssuedAt = new Date();
+        await user.save();
 
         res.status(200).json({
             message: 'Login successful',
-            token,
+            accessToken,
+            refreshToken,
             user: { id: user._id, name: user.name, email: user.email, role: user.role },
         });
     } catch (err) {
         console.error('Login error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// Refresh token endpoint - implements token rotation
+export const refresh = async(req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        if (!refreshToken) return res.status(400).json({ message: 'Refresh token is required' });
+
+        // Hash the provided refresh token
+        const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+        // Find user with matching refresh token
+        const user = await User.findOne({ refreshTokenHash });
+        if (!user) {
+            // Token not found or mismatch — possible token reuse attack
+            console.warn('Refresh token reuse attempt detected');
+            return res.status(401).json({ message: 'Invalid refresh token' });
+        }
+
+        // Generate new access token
+        const accessToken = jwt.sign({ id: user._id, role: user.role, email: user.email },
+            process.env.JWT_SECRET, { expiresIn: process.env.ACCESS_TOKEN_EXPIRY || '15m' }
+        );
+
+        // Generate new refresh token (token rotation)
+        const newRefreshToken = crypto.randomBytes(32).toString('hex');
+        const newRefreshTokenHash = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
+
+        // Update user with new refresh token (old one is invalidated)
+        user.refreshTokenHash = newRefreshTokenHash;
+        user.refreshTokenIssuedAt = new Date();
+        await user.save();
+
+        res.status(200).json({
+            message: 'Token refreshed successfully',
+            accessToken,
+            refreshToken: newRefreshToken,
+        });
+    } catch (err) {
+        console.error('Refresh token error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// Logout endpoint - invalidate refresh token
+export const logout = async(req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        if (!refreshToken) return res.status(400).json({ message: 'Refresh token is required' });
+
+        // Hash the provided refresh token
+        const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+        // Find and clear the refresh token
+        const user = await User.findOne({ refreshTokenHash });
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        // Clear refresh token
+        user.refreshTokenHash = null;
+        user.refreshTokenIssuedAt = null;
+        await user.save();
+
+        res.status(200).json({ message: 'Logged out successfully' });
+    } catch (err) {
+        console.error('Logout error:', err);
         res.status(500).json({ message: 'Server error' });
     }
 };
